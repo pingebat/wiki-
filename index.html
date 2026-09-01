@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Wikipedia Randomizer</title>
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #202122;
+            --text-muted: #54595d;
+            --border-color: #a2a9b1;
+            --accent-color: #364795;
+            --accent-hover: #2a3875;
+            --success-color: #00af89;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+        .container { background: var(--card-bg); width: 100%; max-width: 600px; padding: 30px; border-radius: 8px; border: 1px solid var(--border-color); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        h1 { font-size: 1.6rem; margin-bottom: 20px; text-align: center; color: #000; font-family: serif; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem; }
+        input[type="text"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 1rem; }
+        .row { display: flex; gap: 15px; }
+        .row .form-group { flex: 1; }
+        button { width: 100%; padding: 12px; background-color: var(--accent-color); color: white; border: none; border-radius: 4px; font-size: 1.1rem; font-weight: bold; cursor: pointer; transition: background 0.2s; margin-top: 10px; }
+        button:hover { background-color: var(--accent-hover); }
+        button:disabled { background-color: var(--border-color); cursor: not-allowed; }
+        .status { margin-top: 15px; padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; display: none; }
+        .status.loading { display: block; background: #eaf3ff; color: #2a4b7c; }
+        .status.error { display: block; background: #fee7e6; color: #b32424; }
+        .results { margin-top: 25px; border-top: 1px solid var(--border-color); padding-top: 20px; display: none; }
+        .results.active { display: block; }
+        .article-title { font-size: 1.4rem; color: #364795; text-decoration: none; font-weight: bold; }
+        .article-title:hover { text-decoration: underline; }
+        .meta-tags { display: flex; gap: 10px; margin: 10px 0; font-size: 0.8rem; color: var(--text-muted); }
+        .tag { background: #f1f3f5; padding: 2px 6px; border-radius: 3px; }
+        .snippet { font-size: 0.95rem; line-height: 1.5; color: #444; }
+    </style>
+</head>
+<body>
+
+
+<div class="container">
+    <h1>Advanced Wiki Randomizer</h1>
+    
+    <div class="form-group">
+        <label for="category">Wikipedia Category (Optional)</label>
+        <input type="text" id="category" placeholder="e.g., Quantum_mechanics, 21st-century_inventions">
+    </div>
+    
+    <div class="row">
+        <div class="form-group">
+            <label for="min-words">Min Word Count</label>
+            <input type="number" id="min-words" value="300" min="0">
+        </div>
+        <div class="form-group">
+            <label for="max-words">Max Word Count</label>
+            <input type="number" id="max-words" value="5000" min="0">
+        </div>
+    </div>
+    
+    <div class="form-group">
+        <label for="keywords">Required Keywords (Optional, comma separated)</label>
+        <input type="text" id="keywords" placeholder="e.g., discovery, theory, Europe">
+    </div>
+    
+    <button id="roll-btn">Roll Random Article</button>
+    
+    <div id="status-box" class="status"></div>
+    
+    <div id="results-box" class="results">
+        <a id="art-link" class="article-title" href="#" target="_blank"></a>
+        <div class="meta-tags">
+            <span>Words: <strong id="art-words">0</strong></span>
+            <span class="tag" id="art-match">Matches criteria</span>
+        </div>
+        <p id="art-snippet" class="snippet"></p>
+    </div>
+</div>
+
+
+<script>
+    const rollBtn = document.getElementById('roll-btn');
+    const statusBox = document.getElementById('status-box');
+    const resultsBox = document.getElementById('results-box');
+    
+    rollBtn.addEventListener('click', async () => {
+        const cat = document.getElementById('category').value.trim();
+        const minW = parseInt(document.getElementById('min-words').value) || 0;
+        const maxW = parseInt(document.getElementById('max-words').value) || 999999;
+        const keywords = document.getElementById('keywords').value.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+        
+        showStatus('Searching Wikipedia database...', 'loading');
+        resultsBox.classList.remove('active');
+        rollBtn.disabled = true;
+        
+        let attempts = 0;
+        const maxAttempts = 30; 
+        
+        while (attempts < maxAttempts) {
+            attempts++;
+            showStatus(`Searching... Attempt ${attempts}/${maxAttempts}`, 'loading');
+            
+            try {
+                let title = '';
+                
+                if (cat) {
+                    const catUrl = `https://wikipedia.org{encodeURIComponent(cat)}&cmlimit=500&format=json&origin=*`;
+                    const catRes = await fetch(catUrl).then(r => r.json());
+                    const members = catRes.query?.categorymembers || [];
+                    const articles = members.filter(m => m.ns === 0);
+                    
+                    if (articles.length === 0) {
+                        showStatus('No articles found in that specific category level.', 'error');
+                        rollBtn.disabled = false;
+                        return;
+                    }
+                    title = articles[Math.floor(Math.random() * articles.length)].title;
+                } else {
+                    const randUrl = `https://wikipedia.org*`;
+                    const randRes = await fetch(randUrl).then(r => r.json());
+                    title = randRes.query.random[0].title;
+                }
+                
+                const contentUrl = `https://wikipedia.org|info&exintro=1&explaintext=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
+                const contentRes = await fetch(contentUrl).then(r => r.json());
+                const pageId = Object.keys(contentRes.query.pages)[0];
+                const page = contentRes.query.pages[pageId];
+                
+                if (pageId === '-1' || !page.extract) continue;
+                
+                const text = page.extract;
+                const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+                
+                if (wordCount < minW || wordCount > maxW) continue;
+                
+                if (keywords.length > 0) {
+                    const lowerText = text.toLowerCase();
+                    const matchesAll = keywords.every(kw => lowerText.includes(kw));
+                    if (!matchesAll) continue;
+                }
+                
+                // Instantly redirects your current tab to the verified random article
+                  window.location.href = `https://wikipedia.org{encodeURIComponent(page.title)}`;
+                return;
+
+
+                
+            } catch (err) {
+                console.error(err);
+            }
+        }
+        
+        showStatus('Could not find an article matching your exact filters after 30 attempts. Try broadening your criteria!', 'error');
+        rollBtn.disabled = false;
+    });
+
+
+    function showStatus(msg, type) {
+        statusBox.textContent = msg;
+        statusBox.className = `status ${type}`;
+    }
+    function hideStatus() {
+        statusBox.style.display = 'none';
+    }
+</script>
+
+
+</body>
+</html>
+
