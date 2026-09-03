@@ -38,6 +38,18 @@
         .meta-tags { display: flex; gap: 10px; margin: 10px 0; font-size: 0.8rem; color: var(--text-muted); }
         .tag { background: #f1f3f5; padding: 2px 6px; border-radius: 3px; }
         .snippet { font-size: 0.95rem; line-height: 1.5; color: #444; }
+        .auto-forward-banner {
+            margin-top: 25px;
+            padding: 15px;
+            background: #f1f3f5;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            color: #333;
+            border-left: 4px solid var(--accent-color);
+        }
+        .auto-forward-banner strong { display: block; margin-bottom: 5px; color: #000; }
+        .auto-forward-banner a { color: var(--accent-color); font-weight: bold; text-decoration: none; }
+        .auto-forward-banner a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -78,6 +90,11 @@
         </div>
         <p id="art-snippet" class="snippet"></p>
     </div>
+
+    <div class="auto-forward-banner">
+        <strong>Home Screen / Direct Auto-Forward Link:</strong>
+        Set <a href="redirect.html" id="redirect-link" target="_blank">redirect.html</a> as your home screen or start page. It will automatically load your saved config and forward you straight to a random Wikipedia article!
+    </div>
 </div>
 
 <script>
@@ -85,12 +102,47 @@
     const statusBox = document.getElementById('status-box');
     const resultsBox = document.getElementById('results-box');
     
+    const catInput = document.getElementById('category');
+    const minWordsInput = document.getElementById('min-words');
+    const maxWordsInput = document.getElementById('max-words');
+    const keywordsInput = document.getElementById('keywords');
+
+    // Load saved config on load
+    window.addEventListener('DOMContentLoaded', () => {
+        if (localStorage.getItem('wiki_category') !== null) {
+            catInput.value = localStorage.getItem('wiki_category');
+        }
+        if (localStorage.getItem('wiki_minWords') !== null) {
+            minWordsInput.value = localStorage.getItem('wiki_minWords');
+        }
+        if (localStorage.getItem('wiki_maxWords') !== null) {
+            maxWordsInput.value = localStorage.getItem('wiki_maxWords');
+        }
+        if (localStorage.getItem('wiki_keywords') !== null) {
+            keywordsInput.value = localStorage.getItem('wiki_keywords');
+        }
+    });
+
+    function saveConfig() {
+        localStorage.setItem('wiki_category', catInput.value);
+        localStorage.setItem('wiki_minWords', minWordsInput.value);
+        localStorage.setItem('wiki_maxWords', maxWordsInput.value);
+        localStorage.setItem('wiki_keywords', keywordsInput.value);
+    }
+
+    [catInput, minWordsInput, maxWordsInput, keywordsInput].forEach(input => {
+        input.addEventListener('change', saveConfig);
+        input.addEventListener('input', saveConfig);
+    });
+
     rollBtn.addEventListener('click', async () => {
-        let cat = document.getElementById('category').value.trim();
-        const minW = parseInt(document.getElementById('min-words').value, 10) || 0;
-        const maxWStr = document.getElementById('max-words').value;
+        saveConfig();
+
+        let cat = catInput.value.trim();
+        const minW = parseInt(minWordsInput.value, 10) || 0;
+        const maxWStr = maxWordsInput.value;
         const maxW = maxWStr !== '' ? parseInt(maxWStr, 10) : Infinity;
-        const keywords = document.getElementById('keywords').value
+        const keywords = keywordsInput.value
             .split(',')
             .map(k => k.trim().toLowerCase())
             .filter(k => k.length > 0);
@@ -101,8 +153,6 @@
         
         let attempts = 0;
         const maxAttempts = 30;
-        
-        // Cache category members list when category is provided
         let categoryMembers = null;
 
         while (attempts < maxAttempts) {
@@ -130,7 +180,6 @@
                         }
                     }
 
-                    // Pick 5 random items from category members to check in batch
                     const shuffled = [...categoryMembers].sort(() => 0.5 - Math.random());
                     candidateTitles = shuffled.slice(0, 5).map(m => m.title);
                 } else {
@@ -162,7 +211,6 @@
                         if (!matchesAll) continue;
                     }
 
-                    // Found a match!
                     displayResult(page, wordCount);
                     hideStatus();
                     rollBtn.disabled = false;
@@ -187,7 +235,6 @@
         artLink.href = page.fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, '_'))}`;
         artWords.textContent = wordCount.toLocaleString();
 
-        // Show first ~300 chars as snippet
         let snippetText = page.extract.trim();
         if (snippetText.length > 300) {
             snippetText = snippetText.substring(0, 300) + '...';

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting to Random Wikipedia Article...</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8f9fa;
+            color: #202122;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        .container {
+            background: #ffffff;
+            max-width: 500px;
+            width: 100%;
+            padding: 30px;
+            border-radius: 8px;
+            border: 1px solid #a2a9b1;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        h1 {
+            font-size: 1.4rem;
+            margin-bottom: 15px;
+            color: #364795;
+        }
+        p {
+            font-size: 1rem;
+            margin-bottom: 15px;
+            color: #54595d;
+        }
+        .error {
+            color: #b32424;
+            background: #fee7e6;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+            margin-top: 15px;
+        }
+        a {
+            color: #364795;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1 id="status-title">Finding Article...</h1>
+    <p id="status-desc">Searching Wikipedia based on your saved configuration...</p>
+    <div id="error-box" class="error"></div>
+</div>
+
+<script>
+    async function redirect() {
+        const urlParams = new URLSearchParams(window.location.search);
+
+        const cat = urlParams.has('category')
+            ? urlParams.get('category').trim()
+            : (localStorage.getItem('wiki_category') || '').trim();
+
+        const minW = urlParams.has('minWords')
+            ? parseInt(urlParams.get('minWords'), 10) || 0
+            : (parseInt(localStorage.getItem('wiki_minWords'), 10) || 0);
+
+        const maxWStr = urlParams.has('maxWords')
+            ? urlParams.get('maxWords')
+            : localStorage.getItem('wiki_maxWords');
+        const maxW = maxWStr !== null && maxWStr !== '' ? parseInt(maxWStr, 10) : Infinity;
+
+        const keywordsStr = urlParams.has('keywords')
+            ? urlParams.get('keywords')
+            : (localStorage.getItem('wiki_keywords') || '');
+        const keywords = keywordsStr
+            .split(',')
+            .map(k => k.trim().toLowerCase())
+            .filter(k => k.length > 0);
+
+        let attempts = 0;
+        const maxAttempts = 30;
+        let categoryMembers = null;
+
+        while (attempts < maxAttempts) {
+            attempts++;
+            document.getElementById('status-desc').textContent = `Searching Wikipedia... Attempt ${attempts}/${maxAttempts}`;
+
+            try {
+                let candidateTitles = [];
+
+                if (cat) {
+                    if (!categoryMembers) {
+                        let catTitle = cat;
+                        if (!catTitle.toLowerCase().startsWith('category:')) {
+                            catTitle = 'Category:' + catTitle;
+                        }
+                        const catUrl = `https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=${encodeURIComponent(catTitle)}&cmlimit=500&cmnamespace=0&format=json&origin=*`;
+                        const catRes = await fetch(catUrl).then(r => r.json());
+                        const members = catRes.query?.categorymembers || [];
+                        categoryMembers = members.filter(m => m.ns === 0);
+
+                        if (categoryMembers.length === 0) {
+                            showError('No articles found in that specific category. <a href="index.html">Change settings</a>');
+                            return;
+                        }
+                    }
+
+                    const shuffled = [...categoryMembers].sort(() => 0.5 - Math.random());
+                    candidateTitles = shuffled.slice(0, 5).map(m => m.title);
+                } else {
+                    const randUrl = `https://en.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=5&format=json&origin=*`;
+                    const randRes = await fetch(randUrl).then(r => r.json());
+                    const randoms = randRes.query?.random || [];
+                    candidateTitles = randoms.map(r => r.title);
+                }
+
+                if (candidateTitles.length === 0) continue;
+
+                const titlesParam = candidateTitles.join('|');
+                const contentUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts|info&explaintext=1&inprop=url&titles=${encodeURIComponent(titlesParam)}&format=json&origin=*`;
+                const contentRes = await fetch(contentUrl).then(r => r.json());
+                const pages = contentRes.query?.pages || {};
+
+                for (const pageId in pages) {
+                    const page = pages[pageId];
+                    if (pageId === '-1' || !page.extract) continue;
+
+                    const text = page.extract;
+                    const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+
+                    if (wordCount < minW || wordCount > maxW) continue;
+
+                    if (keywords.length > 0) {
+                        const lowerText = text.toLowerCase();
+                        const matchesAll = keywords.every(kw => lowerText.includes(kw));
+                        if (!matchesAll) continue;
+                    }
+
+                    // Match found! Redirect immediately
+                    const targetUrl = page.fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, '_'))}`;
+                    window.location.href = targetUrl;
+                    return;
+                }
+
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        showError('Could not find a matching article after maximum attempts. <a href="index.html">Adjust settings</a>');
+    }
+
+    function showError(msg) {
+        document.getElementById('status-title').textContent = 'Redirect Failed';
+        document.getElementById('status-desc').style.display = 'none';
+        const errorBox = document.getElementById('error-box');
+        errorBox.innerHTML = msg;
+        errorBox.style.display = 'block';
+    }
+
+    window.addEventListener('DOMContentLoaded', redirect);
+</script>
+
+</body>
+</html>
