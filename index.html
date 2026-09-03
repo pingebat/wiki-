@@ -42,7 +42,6 @@
 </head>
 <body>
 
-
 <div class="container">
     <h1>Advanced Wiki Randomizer</h1>
     
@@ -81,94 +80,133 @@
     </div>
 </div>
 
-
 <script>
     const rollBtn = document.getElementById('roll-btn');
     const statusBox = document.getElementById('status-box');
     const resultsBox = document.getElementById('results-box');
     
     rollBtn.addEventListener('click', async () => {
-        const cat = document.getElementById('category').value.trim();
-        const minW = parseInt(document.getElementById('min-words').value) || 0;
-        const maxW = parseInt(document.getElementById('max-words').value) || 999999;
-        const keywords = document.getElementById('keywords').value.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+        let cat = document.getElementById('category').value.trim();
+        const minW = parseInt(document.getElementById('min-words').value, 10) || 0;
+        const maxWStr = document.getElementById('max-words').value;
+        const maxW = maxWStr !== '' ? parseInt(maxWStr, 10) : Infinity;
+        const keywords = document.getElementById('keywords').value
+            .split(',')
+            .map(k => k.trim().toLowerCase())
+            .filter(k => k.length > 0);
         
         showStatus('Searching Wikipedia database...', 'loading');
         resultsBox.classList.remove('active');
         rollBtn.disabled = true;
         
         let attempts = 0;
-        const maxAttempts = 30; 
+        const maxAttempts = 30;
         
+        // Cache category members list when category is provided
+        let categoryMembers = null;
+
         while (attempts < maxAttempts) {
             attempts++;
             showStatus(`Searching... Attempt ${attempts}/${maxAttempts}`, 'loading');
             
             try {
-                let title = '';
+                let candidateTitles = [];
                 
                 if (cat) {
-                    const catUrl = `https://wikipedia.org{encodeURIComponent(cat)}&cmlimit=500&format=json&origin=*`;
-                    const catRes = await fetch(catUrl).then(r => r.json());
-                    const members = catRes.query?.categorymembers || [];
-                    const articles = members.filter(m => m.ns === 0);
-                    
-                    if (articles.length === 0) {
-                        showStatus('No articles found in that specific category level.', 'error');
-                        rollBtn.disabled = false;
-                        return;
+                    if (!categoryMembers) {
+                        let catTitle = cat;
+                        if (!catTitle.toLowerCase().startsWith('category:')) {
+                            catTitle = 'Category:' + catTitle;
+                        }
+                        const catUrl = `https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=${encodeURIComponent(catTitle)}&cmlimit=500&cmnamespace=0&format=json&origin=*`;
+                        const catRes = await fetch(catUrl).then(r => r.json());
+                        const members = catRes.query?.categorymembers || [];
+                        categoryMembers = members.filter(m => m.ns === 0);
+
+                        if (categoryMembers.length === 0) {
+                            showStatus('No articles found in that specific category.', 'error');
+                            rollBtn.disabled = false;
+                            return;
+                        }
                     }
-                    title = articles[Math.floor(Math.random() * articles.length)].title;
+
+                    // Pick 5 random items from category members to check in batch
+                    const shuffled = [...categoryMembers].sort(() => 0.5 - Math.random());
+                    candidateTitles = shuffled.slice(0, 5).map(m => m.title);
                 } else {
-                    const randUrl = `https://wikipedia.org*`;
+                    const randUrl = `https://en.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=5&format=json&origin=*`;
                     const randRes = await fetch(randUrl).then(r => r.json());
-                    title = randRes.query.random[0].title;
+                    const randoms = randRes.query?.random || [];
+                    candidateTitles = randoms.map(r => r.title);
                 }
                 
-                const contentUrl = `https://wikipedia.org|info&exintro=1&explaintext=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
+                if (candidateTitles.length === 0) continue;
+                
+                const titlesParam = candidateTitles.join('|');
+                const contentUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts|info&explaintext=1&inprop=url&titles=${encodeURIComponent(titlesParam)}&format=json&origin=*`;
                 const contentRes = await fetch(contentUrl).then(r => r.json());
-                const pageId = Object.keys(contentRes.query.pages)[0];
-                const page = contentRes.query.pages[pageId];
+                const pages = contentRes.query?.pages || {};
                 
-                if (pageId === '-1' || !page.extract) continue;
-                
-                const text = page.extract;
-                const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
-                
-                if (wordCount < minW || wordCount > maxW) continue;
-                
-                if (keywords.length > 0) {
-                    const lowerText = text.toLowerCase();
-                    const matchesAll = keywords.every(kw => lowerText.includes(kw));
-                    if (!matchesAll) continue;
+                for (const pageId in pages) {
+                    const page = pages[pageId];
+                    if (pageId === '-1' || !page.extract) continue;
+
+                    const text = page.extract;
+                    const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+
+                    if (wordCount < minW || wordCount > maxW) continue;
+
+                    if (keywords.length > 0) {
+                        const lowerText = text.toLowerCase();
+                        const matchesAll = keywords.every(kw => lowerText.includes(kw));
+                        if (!matchesAll) continue;
+                    }
+
+                    // Found a match!
+                    displayResult(page, wordCount);
+                    hideStatus();
+                    rollBtn.disabled = false;
+                    return;
                 }
-                
-                // Instantly redirects your current tab to the verified random article
-                  window.location.href = `https://wikipedia.org{encodeURIComponent(page.title)}`;
-                return;
-
-
                 
             } catch (err) {
                 console.error(err);
             }
         }
         
-        showStatus('Could not find an article matching your exact filters after 30 attempts. Try broadening your criteria!', 'error');
+        showStatus('Could not find an article matching your criteria after searching. Try broadening your criteria!', 'error');
         rollBtn.disabled = false;
     });
 
+    function displayResult(page, wordCount) {
+        const artLink = document.getElementById('art-link');
+        const artWords = document.getElementById('art-words');
+        const artSnippet = document.getElementById('art-snippet');
+
+        artLink.textContent = page.title;
+        artLink.href = page.fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, '_'))}`;
+        artWords.textContent = wordCount.toLocaleString();
+
+        // Show first ~300 chars as snippet
+        let snippetText = page.extract.trim();
+        if (snippetText.length > 300) {
+            snippetText = snippetText.substring(0, 300) + '...';
+        }
+        artSnippet.textContent = snippetText;
+
+        resultsBox.classList.add('active');
+    }
 
     function showStatus(msg, type) {
         statusBox.textContent = msg;
         statusBox.className = `status ${type}`;
+        statusBox.style.display = 'block';
     }
+
     function hideStatus() {
         statusBox.style.display = 'none';
     }
 </script>
 
-
 </body>
 </html>
-
